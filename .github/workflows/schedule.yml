@@ -1,6 +1,9 @@
 name: Daily Build
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
   schedule:
     - cron: '0 0 * * *'
 jobs:
@@ -21,23 +24,46 @@ jobs:
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-    # - name: Run build script
-    #   run: python build.py
-
     - name: Set git user
       run: |
         git config --global user.name "massyn"
         git config --global user.email "phil.massyn@icloud.com"
 
+    - name: Run sync script
+      run: python sync_database.py
+      env:
+        NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
     - name: Commit changes
       run: |
-        date=$(date +'%Y-%m-%d %H:%M:%S')
-        echo "Automated commit: Update README.md at $date" >> README.md
-        git add README.md
-        git commit -m "Automated commit: Update README.md"
+        git add database/
+        if [ -n "$(git status --porcelain -- database/)" ]; then
+          date=$(date +'%Y-%m-%d %H:%M:%S')
+          git commit -m "Automated commit: Update CVE database at $date"
+        else
+          echo "No changes to commit."
+        fi
 
     - name: Push changes
       run: |
-        git push origin main
+        if [ -n "$(git log origin/main..HEAD)" ]; then
+          git push origin main
+        else
+          echo "Nothing to push."
+        fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Run process script
+      run: python process_database.py
+
+    - name: Build website
+      run: python website.py
+
+    - name: Publish to CloudFlare Pages
+      uses: cloudflare/pages-action@v1
+      with:
+        apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        projectName: cve-db
+        directory: './dist'

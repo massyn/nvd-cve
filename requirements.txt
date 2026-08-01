@@ -1,0 +1,2 @@
+python-dotenv
+jinja2
