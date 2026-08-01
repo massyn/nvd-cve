@@ -38,7 +38,7 @@ class NVDClient:
     def __init__(self, db_dir: str = "database", api_key: str | None = None):
         self.db_dir = db_dir
         self.meta_path = os.path.join(db_dir, "meta.json")
-        self.api_key = api_key or os.environ.get("NVD_API_KEY")
+        self.api_key = (api_key or os.environ.get("NVD_API_KEY") or "").strip() or None
         # NVD rate limits: 5 requests / 30s without an API key, 50 requests / 30s with one.
         self.rate_limit_requests = 50 if self.api_key else 5
         self._request_timestamps: list[float] = []
