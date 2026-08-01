@@ -21,16 +21,18 @@ jobs:
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-    - name: Run build script
-      run: python build.py
+    # - name: Run build script
+    #   run: python build.py
 
     - name: Set git user
       run: |
         git config --global user.name "massyn"
-        git config --global user.email "phil@massyn.net"
+        git config --global user.email "phil.massyn@icloud.com"
 
     - name: Commit changes
       run: |
+        date=$(date +'%Y-%m-%d %H:%M:%S')
+        echo "Automated commit: Update README.md at $date" >> README.md
         git add README.md
         git commit -m "Automated commit: Update README.md"
 
