@@ -67,6 +67,18 @@
 
     <div class="card mb-4">
       <div class="card-body">
+        <h5 class="card-title">Using with dbt</h5>
+        <p class="card-text text-muted">
+          To use this snapshot as a <a href="https://docs.getdbt.com/docs/build/seeds" target="_blank" rel="noopener">dbt seed</a>,
+          download the CSV into your project's <code>seeds/</code> directory:
+        </p>
+        <pre class="bg-body-tertiary p-3 rounded"><code>curl -L -o seeds/{{ csv_filename }} https://cve-db.pages.dev/{{ csv_filename }}
+dbt seed --select {{ csv_filename[:-4] }}</code></pre>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-body">
         <h5 class="card-title">Schema</h5>
         <div class="table-responsive">
           <table class="table table-sm table-striped">
