@@ -1,11 +1,8 @@
 name: Daily Build
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  schedule:
-    - cron: '0 0 * * *'
+  # schedule:
+  #   - cron: '0 0 * * *'
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -35,32 +32,33 @@ jobs:
         NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
     - name: Commit changes
+      id: commit
       run: |
         git add database/
         if [ -n "$(git status --porcelain -- database/)" ]; then
           date=$(date +'%Y-%m-%d %H:%M:%S')
           git commit -m "Automated commit: Update CVE database at $date"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
         else
           echo "No changes to commit."
         fi
 
     - name: Push changes
-      run: |
-        if [ -n "$(git log origin/main..HEAD)" ]; then
-          git push origin main
-        else
-          echo "Nothing to push."
-        fi
+      if: steps.commit.outputs.changed == 'true'
+      run: git push origin main
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Run process script
+      if: steps.commit.outputs.changed == 'true'
       run: python process_database.py
 
     - name: Build website
+      if: steps.commit.outputs.changed == 'true'
       run: python website.py
 
     - name: Publish to CloudFlare Pages
+      if: steps.commit.outputs.changed == 'true'
       uses: cloudflare/pages-action@v1
       with:
         apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

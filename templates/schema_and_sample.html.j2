@@ -1,0 +1,79 @@
+{% extends "base.html.j2" %}
+{% set active_page = "schema" %}
+
+{% block title %}Schema: CVE Remediation Snapshot{% endblock %}
+
+{% block hero %}
+  <div class="hero py-4 mb-5">
+    <div class="container">
+      <p class="section-eyebrow text-white-50 mb-2">Reference</p>
+      <h1 class="mb-0">Schema</h1>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Schema</h5>
+      <p class="card-text text-muted">
+        Every column available in the snapshot, its type, and what it means.
+      </p>
+      <div class="table-responsive mb-0">
+        <table class="table table-sm table-striped">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Type</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for field in schema %}
+            <tr>
+              <td><code>{{ field.column }}</code></td>
+              <td>{{ field.type }}</td>
+              <td>{{ field.description }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Sample Data</h5>
+      <p class="card-text text-muted">
+        The first {{ sample_rows | length }} rows of the snapshot, sorted by CVE ID.
+      </p>
+      <div class="table-responsive mb-0">
+        <table class="table table-sm table-striped">
+          <thead>
+            <tr>
+              {% for column in sample_columns %}
+              <th>{{ column }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in sample_rows %}
+            <tr>
+              {% for column in sample_columns %}
+              <td>
+                {% if column == "cve_id" %}
+                <a href="{{ row.cve_url }}" target="_blank" rel="noopener">{{ row[column] }}</a>
+                {% else %}
+                {{ row[column] }}
+                {% endif %}
+              </td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endblock %}

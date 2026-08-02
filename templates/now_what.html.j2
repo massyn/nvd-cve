@@ -1,0 +1,143 @@
+{% extends "base.html.j2" %}
+{% set active_page = "now-what" %}
+
+{% block title %}Now What?: CVE Remediation Snapshot{% endblock %}
+
+{% block hero %}
+  <div class="hero py-4 mb-5">
+    <div class="container">
+      <p class="section-eyebrow text-white-50 mb-2">Putting it to work</p>
+      <h1 class="mb-0">Now What?</h1>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Query it with DuckDB</h5>
+      <p class="card-text text-muted">
+        <a href="https://duckdb.org/" target="_blank" rel="noopener">DuckDB</a> can read the gzip-compressed
+        snapshot directly, with no download or unzip step required. Install it, then load the file straight
+        from this site into a table:
+      </p>
+      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>INSTALL httpfs;
+LOAD httpfs;
+
+CREATE TABLE cve AS
+SELECT *
+FROM read_csv_auto('https://cve-db.pages.dev/{{ csv_gz_filename }}');</code></pre>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">What should I patch today on internet-facing servers?</h5>
+      <p class="card-text text-muted">
+        For anything reachable from the internet, prioritise CVEs that are exploitable remotely,
+        without needing valid credentials first:
+      </p>
+      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>SELECT cve_id, published, base_severity, base_score, product, cwe
+FROM cve
+WHERE is_remote = 1          -- attack vector: network
+  AND requires_auth = 0      -- no credentials needed
+  AND base_severity IN ('HIGH', 'CRITICAL')
+ORDER BY base_score DESC, published DESC;</code></pre>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">What should I patch today on internal workstations?</h5>
+      <p class="card-text text-muted">
+        For end-user workstations on an internal network, the realistic threat is usually a user
+        being tricked into clicking something, so filter for CVEs that need local or
+        adjacent access and some form of user interaction:
+      </p>
+      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>SELECT cve_id, published, base_severity, base_score, product, cwe
+FROM cve
+WHERE (is_local = 1 OR is_adjacent = 1)
+  AND requires_user_interaction = 1   -- a user has to click/open something
+  AND base_severity IN ('HIGH', 'CRITICAL')
+ORDER BY base_score DESC, published DESC;</code></pre>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">What's being actively exploited right now, with no patch available?</h5>
+      <p class="card-text text-muted">
+        The "drop everything" list: known exploitation in the wild, and nowhere to point a fix yet.
+      </p>
+      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>SELECT cve_id, published, base_severity, base_score, product, cwe
+FROM cve
+WHERE ssvc_exploitation = 'active'
+  AND has_patch_reference = 0
+ORDER BY base_score DESC, published DESC;</code></pre>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Which CVEs are wormable?</h5>
+      <p class="card-text text-muted">
+        No credentials, no user interaction, and automatable at scale: the classic self-propagating
+        worm profile.
+      </p>
+      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>SELECT cve_id, published, base_severity, base_score, product, cwe
+FROM cve
+WHERE is_remote = 1
+  AND requires_auth = 0
+  AND requires_user_interaction = 0
+  AND ssvc_automatable = 'yes'
+ORDER BY base_score DESC, published DESC;</code></pre>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Which products are accumulating the worst backlog?</h5>
+      <p class="card-text text-muted">
+        Group by product to spot which vendor or platform you run is racking up the most, and the
+        most severe, unresolved CVEs:
+      </p>
+      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>SELECT product, COUNT(*) AS cve_count, MAX(base_score) AS worst_score
+FROM cve
+WHERE base_severity IN ('HIGH', 'CRITICAL')
+GROUP BY product
+ORDER BY cve_count DESC
+LIMIT 20;</code></pre>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Which critical CVEs have been sitting unpatched for months?</h5>
+      <p class="card-text text-muted">
+        A patch exists, the severity is critical, and it's still open after 90 days: a process
+        failure, not a data gap.
+      </p>
+      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>SELECT cve_id, published, base_severity, base_score, product, cwe
+FROM cve
+WHERE base_severity = 'CRITICAL'
+  AND has_patch_reference = 1
+  AND published < now() - INTERVAL 90 DAY
+ORDER BY published ASC;</code></pre>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">What matters for kiosks and other physical-access devices?</h5>
+      <p class="card-text text-muted">
+        Hardware you deploy in physically accessible locations (kiosks, ATMs, badge readers) has a
+        different threat model again, so prioritise CVEs that require only physical access:
+      </p>
+      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>SELECT cve_id, published, base_severity, base_score, product, cwe
+FROM cve
+WHERE is_physical = 1
+  AND base_severity IN ('HIGH', 'CRITICAL')
+ORDER BY base_score DESC, published DESC;</code></pre>
+    </div>
+  </div>
+{% endblock %}

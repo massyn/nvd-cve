@@ -1,4 +1,6 @@
 import csv
+import glob
+import gzip
 import logging
 import os
 from datetime import datetime, timezone
@@ -12,10 +14,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 TEMPLATE_DIR = "templates"
-TEMPLATE_NAME = "index.html.j2"
 OUTPUT_DIR = "dist"
-INPUT_CSV = os.path.join(OUTPUT_DIR, "cve_summary.csv")
-OUTPUT_HTML = os.path.join(OUTPUT_DIR, "index.html")
+INPUT_CSV_GZ = os.path.join(OUTPUT_DIR, "cve_summary.csv.gz")
+
+PAGES = {
+    "home.html.j2": "index.html",
+    "downloads.html.j2": "downloads.html",
+    "schema_and_sample.html.j2": "schema.html",
+    "now_what.html.j2": "now-what.html",
+}
 
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 NVD_DETAIL_URL = "https://nvd.nist.gov/vuln/detail/{cve_id}"
@@ -56,8 +63,8 @@ def format_size(num_bytes: int) -> str:
     return f"{size:.1f} TB"
 
 
-def read_rows(input_csv: str) -> list[dict]:
-    with open(input_csv, "r", newline="", encoding="utf-8") as f:
+def read_rows(input_csv_gz: str) -> list[dict]:
+    with gzip.open(input_csv_gz, "rt", newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
@@ -77,16 +84,33 @@ def most_recent(rows: list[dict], date_field: str) -> tuple[str, str]:
     return latest_cve_id, latest_date.strftime(DATE_FORMAT) if latest_date else "N/A"
 
 
-def build_context(input_csv: str) -> dict:
-    rows = read_rows(input_csv)
+def count_rows(csv_path: str) -> int:
+    with open(csv_path, "r", newline="", encoding="utf-8") as f:
+        return sum(1 for _ in csv.reader(f)) - 1
+
+
+def year_csv_files(output_dir: str) -> list[dict]:
+    """Return {filename, size, record_count} for each per-year CSV in output_dir, sorted by year."""
+    paths = sorted(glob.glob(os.path.join(output_dir, "cve_summary_*.csv")))
+    return [
+        {
+            "filename": os.path.basename(path),
+            "size": format_size(os.path.getsize(path)),
+            "record_count": count_rows(path),
+        }
+        for path in paths
+    ]
+
+
+def build_context(input_csv_gz: str) -> dict:
+    rows = read_rows(input_csv_gz)
     last_published_cve, last_published_date = most_recent(rows, "published")
     last_modified_cve, last_modified_date = most_recent(rows, "last_modified")
-    csv_gz_path = input_csv + ".gz"
+    output_dir = os.path.dirname(input_csv_gz)
 
     return {
         "record_count": len(rows),
-        "csv_size": format_size(os.path.getsize(input_csv)),
-        "csv_gz_size": format_size(os.path.getsize(csv_gz_path)),
+        "csv_gz_size": format_size(os.path.getsize(input_csv_gz)),
         "generated_at": datetime.now(timezone.utc).strftime(DATE_FORMAT),
         "last_published_cve": last_published_cve,
         "last_published_url": NVD_DETAIL_URL.format(cve_id=last_published_cve),
@@ -94,8 +118,8 @@ def build_context(input_csv: str) -> dict:
         "last_modified_cve": last_modified_cve,
         "last_modified_url": NVD_DETAIL_URL.format(cve_id=last_modified_cve),
         "last_modified_date": last_modified_date,
-        "csv_filename": os.path.basename(input_csv),
-        "csv_gz_filename": os.path.basename(csv_gz_path),
+        "csv_gz_filename": os.path.basename(input_csv_gz),
+        "year_csv_files": year_csv_files(output_dir),
         "schema": SCHEMA,
         "sample_columns": [field["column"] for field in SCHEMA],
         "sample_rows": [
@@ -105,22 +129,20 @@ def build_context(input_csv: str) -> dict:
     }
 
 
-def main(input_csv: str = INPUT_CSV, output_html: str = OUTPUT_HTML) -> None:
-    logger.info("Building website from %s", input_csv)
-    context = build_context(input_csv)
+def main(input_csv_gz: str = INPUT_CSV_GZ, output_dir: str = OUTPUT_DIR) -> None:
+    logger.info("Building website from %s", input_csv_gz)
+    context = build_context(input_csv_gz)
 
+    os.makedirs(output_dir, exist_ok=True)
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
-    template = env.get_template(TEMPLATE_NAME)
-    html = template.render(**context)
 
-    output_dir = os.path.dirname(output_html)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-
-    with open(output_html, "w", encoding="utf-8") as f:
-        f.write(html)
-
-    logger.info("Wrote %s", output_html)
+    for template_name, output_name in PAGES.items():
+        template = env.get_template(template_name)
+        html = template.render(**context)
+        output_path = os.path.join(output_dir, output_name)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        logger.info("Wrote %s", output_path)
 
 
 if __name__ == "__main__":

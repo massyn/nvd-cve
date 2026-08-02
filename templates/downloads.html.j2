@@ -1,0 +1,63 @@
+{% extends "base.html.j2" %}
+{% set active_page = "downloads" %}
+
+{% block title %}Downloads: CVE Remediation Snapshot{% endblock %}
+
+{% block hero %}
+  <div class="hero py-4 mb-5">
+    <div class="container">
+      <p class="section-eyebrow text-white-50 mb-2">Data</p>
+      <h1 class="mb-0">Downloads</h1>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Files</h5>
+      <p class="card-text text-muted">
+        Download the complete history as a single compressed file, or grab just the year you need.
+        Generated {{ generated_at }} UTC.
+      </p>
+      <div class="table-responsive mb-0">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>File</th>
+              <th class="text-end">Records</th>
+              <th class="text-end">Size</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">🗜️ <a href="{{ csv_gz_filename }}">{{ csv_gz_filename }}</a> <span class="badge text-bg-light">all years</span></th>
+              <td class="text-end">{{ "{:,}".format(record_count) }}</td>
+              <td class="text-end">{{ csv_gz_size }}</td>
+            </tr>
+            {% for file in year_csv_files %}
+            <tr>
+              <th scope="row">📄 <a href="{{ file.filename }}">{{ file.filename }}</a></th>
+              <td class="text-end">{{ "{:,}".format(file.record_count) }}</td>
+              <td class="text-end">{{ file.size }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Using with dbt</h5>
+      <p class="card-text text-muted">
+        To use this snapshot as a <a href="https://docs.getdbt.com/docs/build/seeds" target="_blank" rel="noopener">dbt seed</a>,
+        download the gzip-compressed file (all years) into your project's <code>seeds/</code> directory and unzip it:
+      </p>
+      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>curl -L -o seeds/{{ csv_gz_filename }} https://cve-db.pages.dev/{{ csv_gz_filename }}
+gunzip seeds/{{ csv_gz_filename }}
+dbt seed --select {{ csv_gz_filename[:-7] }}</code></pre>
+    </div>
+  </div>
+{% endblock %}

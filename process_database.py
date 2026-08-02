@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import re
-import shutil
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -19,6 +18,31 @@ DATABASE_DIR = "database"
 OUTPUT_DIR = "dist"
 OUTPUT_CSV = os.path.join(OUTPUT_DIR, "cve_summary.csv")
 OUTPUT_CSV_GZ = OUTPUT_CSV + ".gz"
+
+CSV_FIELDNAMES = [
+    "cve_id",
+    "published",
+    "last_modified",
+    "vuln_status",
+    "is_app",
+    "is_os",
+    "is_hardware",
+    "product",
+    "cwe",
+    "cvss_version",
+    "base_score",
+    "base_severity",
+    "is_remote",
+    "is_adjacent",
+    "is_local",
+    "is_physical",
+    "requires_auth",
+    "requires_user_interaction",
+    "ssvc_exploitation",
+    "ssvc_automatable",
+    "has_patch_reference",
+    "cvss_vector",
+]
 
 
 def format_utc(date_str: str) -> str:
@@ -221,6 +245,12 @@ def cve_id_sort_key(row: dict) -> tuple[int, int, str]:
     return (int(year), int(sequence), "")
 
 
+def cve_year(row: dict) -> str:
+    """Return the year segment of a CVE ID, e.g. '2023' for 'CVE-2023-4984'."""
+    match = re.match(r"CVE-(\d+)-\d+$", row["cve_id"])
+    return match.group(1) if match else "unknown"
+
+
 def main(database_dir: str = DATABASE_DIR, output_csv: str = OUTPUT_CSV) -> None:
     logger.info("Scanning %s for CVE records", database_dir)
     rows = []
@@ -237,45 +267,30 @@ def main(database_dir: str = DATABASE_DIR, output_csv: str = OUTPUT_CSV) -> None
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    with open(output_csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(
-            f,
-            fieldnames=[
-                "cve_id",
-                "published",
-                "last_modified",
-                "vuln_status",
-                "is_app",
-                "is_os",
-                "is_hardware",
-                "product",
-                "cwe",
-                "cvss_version",
-                "base_score",
-                "base_severity",
-                "is_remote",
-                "is_adjacent",
-                "is_local",
-                "is_physical",
-                "requires_auth",
-                "requires_user_interaction",
-                "ssvc_exploitation",
-                "ssvc_automatable",
-                "has_patch_reference",
-                "cvss_vector",
-            ],
-            quoting=csv.QUOTE_NONNUMERIC,
-        )
+    # Cloudflare Pages rejects any single deployed file over 26.2 MB, and the
+    # combined CSV has grown past that. Split it into one file per CVE year
+    # (mirroring database/<year>/) instead of shipping one giant file.
+    rows_by_year: dict[str, list[dict]] = {}
+    for row in rows:
+        rows_by_year.setdefault(cve_year(row), []).append(row)
+
+    year_files = []
+    for year in sorted(rows_by_year):
+        year_csv = os.path.join(output_dir, f"cve_summary_{year}.csv")
+        with open(year_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, quoting=csv.QUOTE_NONNUMERIC)
+            writer.writeheader()
+            writer.writerows(rows_by_year[year])
+        logger.info("Wrote %d rows to %s", len(rows_by_year[year]), year_csv)
+        year_files.append(year_csv)
+
+    output_csv_gz = output_csv + ".gz"
+    with gzip.open(output_csv_gz, "wt", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, quoting=csv.QUOTE_NONNUMERIC)
         writer.writeheader()
         writer.writerows(rows)
 
-    logger.info("Wrote %d rows to %s", len(rows), output_csv)
-
-    output_csv_gz = output_csv + ".gz"
-    with open(output_csv, "rb") as f_in, gzip.open(output_csv_gz, "wb") as f_out:
-        shutil.copyfileobj(f_in, f_out)
-
-    logger.info("Wrote compressed CSV to %s", output_csv_gz)
+    logger.info("Wrote compressed CSV (%d rows) to %s", len(rows), output_csv_gz)
 
 
 if __name__ == "__main__":
