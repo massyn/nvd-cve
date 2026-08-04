@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
@@ -17,11 +18,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_LOOKBACK_DAYS = 30
 
 
-def sync(client: NVDClient, no_refresh: bool = False) -> None:
+def sync(client: NVDClient, no_refresh: bool = False, workers: int = 2) -> None:
     """Pull everything changed since the last successful run and cache it.
 
     If no_refresh is True, CVEs that already have a cached JSON file are
     skipped entirely instead of being re-downloaded.
+    `workers` controls how many CVEs are downloaded concurrently; NVD's shared
+    request budget (5 or 50 per 30s) is enforced across all worker threads.
     """
     client.migrate_flat_files()
 
@@ -67,11 +70,20 @@ def sync(client: NVDClient, no_refresh: bool = False) -> None:
 
     not_yet_downloaded_set = set(not_yet_downloaded)
     total = len(to_download)
-    for i, cve_id in enumerate(to_download, start=1):
+
+    def process(i: int, cve_id: str) -> None:
         client.get_cve(
             cve_id, position=i, total=total,
             skip_if_exists=cve_id in not_yet_downloaded_set,
         )
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [
+            executor.submit(process, i, cve_id)
+            for i, cve_id in enumerate(to_download, start=1)
+        ]
+        for future in as_completed(futures):
+            future.result()
 
     meta["last_run"] = now.isoformat()
     client.save_meta(meta)
@@ -84,9 +96,13 @@ def main() -> None:
         "--no-refresh", action="store_true",
         help="Skip CVEs that already have a cached JSON file instead of re-downloading them.",
     )
+    parser.add_argument(
+        "--workers", type=int, default=2,
+        help="Number of CVEs to download concurrently (default: 2).",
+    )
     args = parser.parse_args()
 
-    sync(NVDClient(), no_refresh=args.no_refresh)
+    sync(NVDClient(), no_refresh=args.no_refresh, workers=args.workers)
 
 
 if __name__ == "__main__":

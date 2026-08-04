@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -42,6 +43,7 @@ class NVDClient:
         # NVD rate limits: 5 requests / 30s without an API key, 50 requests / 30s with one.
         self.rate_limit_requests = 50 if self.api_key else 5
         self._request_timestamps: list[float] = []
+        self._throttle_lock = threading.Lock()
 
     # -- local cache helpers -------------------------------------------------
 
@@ -98,19 +100,29 @@ class NVDClient:
     # -- NVD API access -------------------------------------------------------
 
     def _throttle(self) -> None:
-        now = time.monotonic()
-        timestamps = self._request_timestamps
-        while timestamps and now - timestamps[0] > RATE_LIMIT_WINDOW_SECONDS:
-            timestamps.pop(0)
-        if len(timestamps) >= self.rate_limit_requests:
-            sleep_for = RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0])
-            if sleep_for > 0:
+        """Block until a request slot is free, then reserve one.
+
+        Thread-safe so multiple worker threads can share the same 50-req/30s
+        (or 5-req/30s) NVD budget: the shared timestamp list is only mutated
+        under the lock, but any wait happens outside it so other threads can
+        still check in while this one sleeps.
+        """
+        while True:
+            with self._throttle_lock:
+                now = time.monotonic()
+                timestamps = self._request_timestamps
+                while timestamps and now - timestamps[0] > RATE_LIMIT_WINDOW_SECONDS:
+                    timestamps.pop(0)
+                if len(timestamps) < self.rate_limit_requests:
+                    timestamps.append(now)
+                    return
+                sleep_for = RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0])
                 logger.info(
                     "Rate limit reached (%d requests in the last %.0fs), sleeping %.1fs",
                     len(timestamps), RATE_LIMIT_WINDOW_SECONDS, sleep_for,
                 )
+            if sleep_for > 0:
                 time.sleep(sleep_for)
-        timestamps.append(time.monotonic())
 
     def _nvd_get(self, params: dict[str, str]) -> dict:
         url = f"{NVD_BASE_URL}?{urllib.parse.urlencode(params)}"
