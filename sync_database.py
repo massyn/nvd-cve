@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
-from nvd_client import NVDClient
+from nvd_client import EtaTracker, NVDClient
 
 load_dotenv()
 
@@ -70,11 +70,13 @@ def sync(client: NVDClient, no_refresh: bool = False, workers: int = 2) -> None:
 
     not_yet_downloaded_set = set(not_yet_downloaded)
     total = len(to_download)
+    eta = EtaTracker(total)
 
     def process(i: int, cve_id: str) -> None:
         client.get_cve(
             cve_id, position=i, total=total,
             skip_if_exists=cve_id in not_yet_downloaded_set,
+            log_suffix=eta.suffix(),
         )
 
     with ThreadPoolExecutor(max_workers=workers) as executor:

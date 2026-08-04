@@ -29,6 +29,43 @@ TRANSIENT_BACKOFF_MAX_SECONDS = 300
 RATE_LIMIT_WINDOW_SECONDS = 30.0
 
 
+class EtaTracker:
+    """Thread-safe helper that estimates time remaining across a batch of work.
+
+    Shared by catchup.py and sync_database.py so both report progress the
+    same way when downloading CVEs concurrently.
+    """
+
+    def __init__(self, total: int):
+        self.total = total
+        self._start_time = time.monotonic()
+        self._completed = 0
+        self._lock = threading.Lock()
+
+    def suffix(self) -> str:
+        """Return an ", ETA: ..." string based on completions so far, then
+        record this call as one more completion.
+
+        Must be called once per item, right before that item's own log line
+        is emitted, so the returned ETA reflects throughput up to (but not
+        including) the item currently being reported.
+        """
+        with self._lock:
+            done = self._completed
+            self._completed += 1
+
+        if done < 1:
+            return ""
+
+        elapsed_hours = (time.monotonic() - self._start_time) / 3600
+        eta_hours = elapsed_hours / done * (self.total - done)
+        if eta_hours < 1 / 60:
+            return f", ETA: {eta_hours * 3600:.0f} second(s)"
+        if eta_hours < 1:
+            return f", ETA: {eta_hours * 60:.1f} minute(s)"
+        return f", ETA: {eta_hours:.1f} hour(s)"
+
+
 class NVDClient:
     """Talks to the NVD REST API and maintains a local JSON cache of CVEs.
 
@@ -117,7 +154,7 @@ class NVDClient:
                     timestamps.append(now)
                     return
                 sleep_for = RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0])
-                logger.info(
+                logger.debug(
                     "Rate limit reached (%d requests in the last %.0fs), sleeping %.1fs",
                     len(timestamps), RATE_LIMIT_WINDOW_SECONDS, sleep_for,
                 )
@@ -225,6 +262,7 @@ class NVDClient:
         position: int | None = None,
         total: int | None = None,
         skip_if_exists: bool = False,
+        log_suffix: str = "",
     ) -> dict | None:
         """Fetch a single CVE from NVD and save it to the database folder.
 
@@ -235,9 +273,6 @@ class NVDClient:
         if skip_if_exists and os.path.exists(self.cve_path(cve_id)):
             logger.info("Skipping %s, already cached by another process", cve_id)
             return None
-
-        if position is not None and total is not None:
-            logger.info("[%d/%d] Fetching %s", position, total, cve_id)
 
         data = self._nvd_get({"cveId": cve_id})
         vulnerabilities = data.get("vulnerabilities", [])
@@ -252,5 +287,9 @@ class NVDClient:
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(cve_record, f, indent=2)
 
-        logger.info("Saved %s (%s) [%s]", path, cve_id, "new" if is_new else "overwrite")
+        status = "new" if is_new else "overwrite"
+        if position is not None and total is not None:
+            logger.info("%d / %d: %s (%s)%s", position, total, cve_id, status, log_suffix)
+        else:
+            logger.info("%s (%s)%s", cve_id, status, log_suffix)
         return cve_record
