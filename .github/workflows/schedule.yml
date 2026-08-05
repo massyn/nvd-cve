@@ -1,8 +1,8 @@
 name: Daily Build
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: '0 0 * * *'
+  schedule:
+    - cron: '0 0 * * *'
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -49,19 +49,19 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # - name: Run process script
-    #   if: steps.commit.outputs.changed == 'true'
-    #   run: python process_database.py
+    - name: Run process script
+      if: steps.commit.outputs.changed == 'true'
+      run: python process_database.py
 
-    # - name: Build website
-    #   if: steps.commit.outputs.changed == 'true'
-    #   run: python website.py
+    - name: Build website
+      if: steps.commit.outputs.changed == 'true'
+      run: python website.py
 
-    # - name: Publish to CloudFlare Pages
-    #   if: steps.commit.outputs.changed == 'true'
-    #   uses: cloudflare/pages-action@v1
-    #   with:
-    #     apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-    #     accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-    #     projectName: cve-db
-    #     directory: './dist'
+    - name: Publish to CloudFlare Pages
+      if: steps.commit.outputs.changed == 'true'
+      uses: cloudflare/pages-action@v1
+      with:
+        apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        projectName: cve-db
+        directory: './dist'
