@@ -27,6 +27,7 @@ jobs:
         git config --global user.email "phil.massyn@icloud.com"
 
     - name: Run sync script
+      id: sync
       run: python sync_database.py
       env:
         NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
@@ -37,7 +38,7 @@ jobs:
         git add database/
         if [ -n "$(git status --porcelain -- database/)" ]; then
           date=$(date +'%Y-%m-%d %H:%M:%S')
-          git commit -m "Automated commit: Update CVE database at $date"
+          git commit -m "Automated commit: Update CVE database at $date (added ${{ steps.sync.outputs.added }}, updated ${{ steps.sync.outputs.updated }})"
           echo "changed=true" >> "$GITHUB_OUTPUT"
         else
           echo "No changes to commit."

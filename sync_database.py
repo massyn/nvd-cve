@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
@@ -90,6 +91,18 @@ def sync(client: NVDClient, no_refresh: bool = False, workers: int = 2) -> None:
     meta["last_run"] = now.isoformat()
     client.save_meta(meta)
     logger.info("Sync complete, last_run updated to %s", meta["last_run"])
+
+    write_github_output(added=len(not_yet_downloaded), updated=len(stale))
+
+
+def write_github_output(added: int, updated: int) -> None:
+    """Expose added/updated counts as GitHub Actions step outputs, if running in CI."""
+    output_path = os.environ.get("GITHUB_OUTPUT")
+    if not output_path:
+        return
+    with open(output_path, "a", encoding="utf-8") as f:
+        f.write(f"added={added}\n")
+        f.write(f"updated={updated}\n")
 
 
 def main() -> None:
