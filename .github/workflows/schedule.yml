@@ -38,7 +38,7 @@ jobs:
         git add database/
         if [ -n "$(git status --porcelain -- database/)" ]; then
           date=$(date +'%Y-%m-%d %H:%M:%S')
-          git commit -m "Automated commit: Update CVE database at $date (added ${{ steps.sync.outputs.added }}, updated ${{ steps.sync.outputs.updated }})"
+          git commit -m "Schedule: $date (added ${{ steps.sync.outputs.added }}, updated ${{ steps.sync.outputs.updated }})"
           echo "changed=true" >> "$GITHUB_OUTPUT"
         else
           echo "No changes to commit."
