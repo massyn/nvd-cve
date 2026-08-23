@@ -89,17 +89,28 @@ def count_rows(csv_path: str) -> int:
         return sum(1 for _ in csv.reader(f)) - 1
 
 
-def year_csv_files(output_dir: str) -> list[dict]:
-    """Return {filename, size, record_count} for each per-year CSV in output_dir, sorted by year."""
-    paths = sorted(glob.glob(os.path.join(output_dir, "cve_summary_*.csv")))
-    return [
-        {
-            "filename": os.path.basename(path),
-            "size": format_size(os.path.getsize(path)),
-            "record_count": count_rows(path),
-        }
-        for path in paths
-    ]
+def year_files(output_dir: str) -> list[dict]:
+    """Return {year, record_count, csv: {filename, size}, parquet: {filename, size}} per year, sorted by year."""
+    csv_paths = sorted(glob.glob(os.path.join(output_dir, "cve_summary_*.csv")))
+    files = []
+    for csv_path in csv_paths:
+        year = os.path.basename(csv_path)[len("cve_summary_"):-len(".csv")]
+        parquet_path = os.path.join(output_dir, f"cve_summary_{year}.parquet")
+        files.append(
+            {
+                "year": year,
+                "record_count": count_rows(csv_path),
+                "csv": {
+                    "filename": os.path.basename(csv_path),
+                    "size": format_size(os.path.getsize(csv_path)),
+                },
+                "parquet": {
+                    "filename": os.path.basename(parquet_path),
+                    "size": format_size(os.path.getsize(parquet_path)),
+                },
+            }
+        )
+    return files
 
 
 def build_context(input_csv_gz: str) -> dict:
@@ -107,10 +118,12 @@ def build_context(input_csv_gz: str) -> dict:
     last_published_cve, last_published_date = most_recent(rows, "published")
     last_modified_cve, last_modified_date = most_recent(rows, "last_modified")
     output_dir = os.path.dirname(input_csv_gz)
+    parquet_path = os.path.join(output_dir, "cve_summary.parquet")
 
     return {
         "record_count": len(rows),
         "csv_gz_size": format_size(os.path.getsize(input_csv_gz)),
+        "parquet_size": format_size(os.path.getsize(parquet_path)),
         "generated_at": datetime.now(timezone.utc).strftime(DATE_FORMAT),
         "last_published_cve": last_published_cve,
         "last_published_url": NVD_DETAIL_URL.format(cve_id=last_published_cve),
@@ -119,7 +132,8 @@ def build_context(input_csv_gz: str) -> dict:
         "last_modified_url": NVD_DETAIL_URL.format(cve_id=last_modified_cve),
         "last_modified_date": last_modified_date,
         "csv_gz_filename": os.path.basename(input_csv_gz),
-        "year_csv_files": year_csv_files(output_dir),
+        "parquet_filename": os.path.basename(parquet_path),
+        "year_files": year_files(output_dir),
         "schema": SCHEMA,
         "sample_columns": [field["column"] for field in SCHEMA],
         "sample_rows": [

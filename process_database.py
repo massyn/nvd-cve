@@ -7,6 +7,8 @@ import re
 from collections import Counter
 from datetime import datetime, timezone
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -251,6 +253,16 @@ def cve_year(row: dict) -> str:
     return match.group(1) if match else "unknown"
 
 
+def write_parquet(rows: list[dict], parquet_path: str) -> None:
+    """Write rows to a Parquet file, keeping every column as a string to match the CSV output."""
+    columns = {
+        fieldname: pa.array([str(row[fieldname]) for row in rows], type=pa.string())
+        for fieldname in CSV_FIELDNAMES
+    }
+    table = pa.table(columns)
+    pq.write_table(table, parquet_path)
+
+
 def main(database_dir: str = DATABASE_DIR, output_csv: str = OUTPUT_CSV) -> None:
     logger.info("Scanning %s for CVE records", database_dir)
     rows = []
@@ -284,6 +296,10 @@ def main(database_dir: str = DATABASE_DIR, output_csv: str = OUTPUT_CSV) -> None
         logger.info("Wrote %d rows to %s", len(rows_by_year[year]), year_csv)
         year_files.append(year_csv)
 
+        year_parquet = os.path.join(output_dir, f"cve_summary_{year}.parquet")
+        write_parquet(rows_by_year[year], year_parquet)
+        logger.info("Wrote %d rows to %s", len(rows_by_year[year]), year_parquet)
+
     output_csv_gz = output_csv + ".gz"
     with gzip.open(output_csv_gz, "wt", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, quoting=csv.QUOTE_NONNUMERIC)
@@ -291,6 +307,10 @@ def main(database_dir: str = DATABASE_DIR, output_csv: str = OUTPUT_CSV) -> None
         writer.writerows(rows)
 
     logger.info("Wrote compressed CSV (%d rows) to %s", len(rows), output_csv_gz)
+
+    output_parquet = os.path.join(output_dir, "cve_summary.parquet")
+    write_parquet(rows, output_parquet)
+    logger.info("Wrote combined Parquet (%d rows) to %s", len(rows), output_parquet)
 
 
 if __name__ == "__main__":

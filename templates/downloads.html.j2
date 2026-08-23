@@ -24,22 +24,31 @@
         <table class="table table-sm align-middle">
           <thead>
             <tr>
-              <th>File</th>
+              <th>Year</th>
               <th class="text-end">Records</th>
+              <th>CSV</th>
+              <th class="text-end">Size</th>
+              <th>Parquet</th>
               <th class="text-end">Size</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <th scope="row">🗜️ <a href="{{ csv_gz_filename }}">{{ csv_gz_filename }}</a> <span class="badge text-bg-light">all years</span></th>
+              <th scope="row">All years</th>
               <td class="text-end">{{ "{:,}".format(record_count) }}</td>
+              <td>🗜️ <a href="{{ csv_gz_filename }}">{{ csv_gz_filename }}</a></td>
               <td class="text-end">{{ csv_gz_size }}</td>
+              <td>📦 <a href="{{ parquet_filename }}">{{ parquet_filename }}</a></td>
+              <td class="text-end">{{ parquet_size }}</td>
             </tr>
-            {% for file in year_csv_files %}
+            {% for file in year_files %}
             <tr>
-              <th scope="row">📄 <a href="{{ file.filename }}">{{ file.filename }}</a></th>
+              <th scope="row">{{ file.year }}</th>
               <td class="text-end">{{ "{:,}".format(file.record_count) }}</td>
-              <td class="text-end">{{ file.size }}</td>
+              <td>📄 <a href="{{ file.csv.filename }}">{{ file.csv.filename }}</a></td>
+              <td class="text-end">{{ file.csv.size }}</td>
+              <td>📦 <a href="{{ file.parquet.filename }}">{{ file.parquet.filename }}</a></td>
+              <td class="text-end">{{ file.parquet.size }}</td>
             </tr>
             {% endfor %}
           </tbody>
