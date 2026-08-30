@@ -18,15 +18,19 @@
       <h5 class="card-title">Query it with DuckDB</h5>
       <p class="card-text text-muted">
         <a href="https://duckdb.org/" target="_blank" rel="noopener">DuckDB</a> can read the gzip-compressed
-        snapshot directly, with no download or unzip step required. Install it, then load the file straight
-        from this site into a table:
+        year files directly, with no download or unzip step required. Install it, then load every year
+        straight from this site into a single table:
       </p>
       <pre class="bg-body-tertiary p-3 rounded mb-0"><code>INSTALL httpfs;
 LOAD httpfs;
 
 CREATE TABLE cve AS
 SELECT *
-FROM read_csv_auto('https://cve-db.pages.dev/{{ csv_gz_filename }}');</code></pre>
+FROM read_csv_auto([
+{%- for year in summary_years %}
+  '{{ site_url }}/cve_summary_{{ year }}.csv.gz'{{ "," if not loop.last }}
+{%- endfor %}
+]);</code></pre>
     </div>
   </div>
 
