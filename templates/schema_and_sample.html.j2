@@ -15,6 +15,19 @@
 {% block content %}
   <div class="card mb-4">
     <div class="card-body">
+      <h5 class="card-title">Schema definition</h5>
+      <p class="card-text text-muted mb-0">
+        This page is generated from a <a href="https://docs.getdbt.com/reference/resource-properties/columns"
+        target="_blank" rel="noopener">dbt schema.yml</a> file, the single source of truth for both
+        tables' structure. Column types are kept portable (string, integer, float, timestamp) so the
+        file works unchanged against any database platform. Download it here:
+        <a href="{{ dbt_schema_filename }}">{{ dbt_schema_filename }}</a>.
+      </p>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
       <h5 class="card-title">cve_summary</h5>
       <p class="card-text text-muted">
         The main table: one row per CVE. Every column, its type, and what it means. Published as

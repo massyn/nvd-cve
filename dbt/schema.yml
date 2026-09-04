@@ -1,0 +1,137 @@
+version: 2
+
+# Source-of-truth schema for the published cve_summary and cve_cpe tables.
+# data_type uses portable types only (string, integer, float, timestamp) so
+# this file works unchanged whether loaded into Postgres, MySQL, SQLite,
+# Snowflake, BigQuery, DuckDB, etc. Booleans are represented as integer 0/1
+# rather than a native boolean type, since not every platform has one
+# (e.g. SQLite).
+#
+# This is the authoritative definition of both tables. The website's schema
+# page (schema.html) is generated from this file, not hand-maintained.
+
+models:
+  - name: cve_summary
+    description: >
+      The main table: one row per CVE. Published as one file per CVE year
+      (cve_summary_<year>.csv.gz and cve_summary_<year>.parquet).
+    columns:
+      - name: cve_id
+        data_type: string
+        description: "CVE identifier, e.g. CVE-2024-12345."
+      - name: published
+        data_type: timestamp
+        description: "When the CVE was first published to the NVD (UTC)."
+      - name: last_modified
+        data_type: timestamp
+        description: "When the CVE record was last updated in the NVD (UTC)."
+      - name: vuln_status
+        data_type: string
+        description: "NVD analysis status, e.g. Analyzed, Awaiting Analysis."
+      - name: is_app
+        data_type: integer
+        description: "1 if the CVE affects an application, per its CPE configurations, else 0."
+      - name: is_os
+        data_type: integer
+        description: "1 if the CVE affects an operating system, per its CPE configurations, else 0."
+      - name: is_hardware
+        data_type: integer
+        description: "1 if the CVE affects hardware, per its CPE configurations, else 0."
+      - name: product
+        data_type: string
+        description: "Most commonly referenced affected product in the CVE's CPE matches."
+      - name: cwe
+        data_type: string
+        description: "Primary weakness classification (CWE) assigned to the CVE."
+      - name: cvss_version
+        data_type: string
+        description: "Version of the CVSS metric used (4.0, 3.1, 3.0 or 2.0), highest available preferred."
+      - name: base_score
+        data_type: float
+        description: "CVSS base score for the primary metric (0.0-10.0)."
+      - name: base_severity
+        data_type: string
+        description: "CVSS base severity rating, e.g. LOW, MEDIUM, HIGH, CRITICAL."
+      - name: is_remote
+        data_type: integer
+        description: "1 if the attack vector is Network (AV:N), else 0."
+      - name: is_adjacent
+        data_type: integer
+        description: "1 if the attack vector is Adjacent (AV:A), else 0."
+      - name: is_local
+        data_type: integer
+        description: "1 if the attack vector is Local (AV:L), else 0."
+      - name: is_physical
+        data_type: integer
+        description: "1 if the attack vector is Physical (AV:P), else 0."
+      - name: requires_auth
+        data_type: integer
+        description: "1 if exploitation requires the attacker to be authenticated/have privileges, else 0."
+      - name: requires_user_interaction
+        data_type: integer
+        description: "1 if exploitation requires interaction from a user other than the attacker, else 0."
+      - name: ssvc_exploitation
+        data_type: string
+        description: "SSVC exploitation state, e.g. none, poc, active."
+      - name: ssvc_automatable
+        data_type: string
+        description: "SSVC automatable rating (yes/no) - whether exploitation can be scripted at scale."
+      - name: has_patch_reference
+        data_type: integer
+        description: "1 if a reference tagged 'Patch' is available for this CVE, else 0."
+      - name: cvss_vector
+        data_type: string
+        description: "Full CVSS vector string the metrics above were derived from."
+      - name: epss
+        data_type: float
+        description: "EPSS score (0.0-1.0): probability of exploitation in the next 30 days. N/A if no EPSS score exists for this CVE."
+      - name: epss_percentile
+        data_type: float
+        description: "Percentile rank of this CVE's EPSS score among all scored CVEs. N/A if no EPSS score exists for this CVE."
+      - name: is_kev
+        data_type: integer
+        description: "1 if listed in CISA's Known Exploited Vulnerabilities (KEV) catalog, else 0."
+      - name: kev_date_added
+        data_type: timestamp
+        description: "When this CVE was added to the CISA KEV catalog (UTC). N/A if not KEV-listed."
+
+  - name: cve_cpe
+    description: >
+      A child table keyed by cve_id, with one row for every CPE match entry
+      in a CVE's configurations. Exists because cve_summary's product column
+      collapses to a single most-common value and drops the version-range
+      data (version_start_including and friends) needed for real version
+      matching. Published only as one file per CVE year
+      (cve_cpe_<year>.csv.gz and cve_cpe_<year>.parquet); there is no
+      combined "all years" file.
+    columns:
+      - name: cve_id
+        data_type: string
+        description: "CVE identifier, joins to cve_summary.cve_id."
+      - name: criteria
+        data_type: string
+        description: "Full cpe:2.3 URI as it appears in the NVD record."
+      - name: vendor
+        data_type: string
+        description: "Parsed from criteria (4th colon-delimited field)."
+      - name: product
+        data_type: string
+        description: "Parsed from criteria (5th colon-delimited field)."
+      - name: version
+        data_type: string
+        description: 'Exact version from criteria, or "*" if this match is range-based.'
+      - name: version_start_including
+        data_type: string
+        description: "From NVD versionStartIncluding, null if absent."
+      - name: version_start_excluding
+        data_type: string
+        description: "From NVD versionStartExcluding, null if absent."
+      - name: version_end_including
+        data_type: string
+        description: "From NVD versionEndIncluding, null if absent."
+      - name: version_end_excluding
+        data_type: string
+        description: "From NVD versionEndExcluding, null if absent."
+      - name: vulnerable
+        data_type: integer
+        description: 'NVD''s own "vulnerable" flag on the cpeMatch entry (0 or 1).'

@@ -1,9 +1,11 @@
 import csv
 import gzip
+import io
 import json
 import logging
 import os
 import re
+import urllib.request
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -18,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 DATABASE_DIR = "database"
 OUTPUT_DIR = "dist"
+
+EPSS_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
+KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+HTTP_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 CVE_CPE_FIELDNAMES = [
     "cve_id",
@@ -63,6 +69,10 @@ CSV_FIELDNAMES = [
     "ssvc_automatable",
     "has_patch_reference",
     "cvss_vector",
+    "epss",
+    "epss_percentile",
+    "is_kev",
+    "kev_date_added",
 ]
 
 
@@ -256,6 +266,46 @@ def has_patch_reference(reference_tags: list[str]) -> int:
     return 1 if "Patch" in reference_tags else 0
 
 
+def download_epss(url: str = EPSS_URL) -> dict[str, tuple[str, str]]:
+    """Download the EPSS bulk scores file and return {cve_id: (epss, percentile)}.
+
+    The file is a gzip CSV with an optional leading "#"-prefixed metadata
+    comment line, which is stripped before parsing.
+    """
+    req = urllib.request.Request(url, headers=HTTP_HEADERS)
+    with urllib.request.urlopen(req) as resp:
+        raw = resp.read()
+
+    with gzip.open(io.BytesIO(raw)) as f:
+        text = f.read().decode("utf-8")
+
+    lines = text.splitlines()
+    if lines and lines[0].startswith("#"):
+        lines = lines[1:]
+
+    scores = {}
+    for row in csv.DictReader(lines):
+        scores[row["cve"]] = (row["epss"], row["percentile"])
+
+    logger.info("Downloaded %d EPSS score(s)", len(scores))
+    return scores
+
+
+def download_kev(url: str = KEV_URL) -> dict[str, str]:
+    """Download the CISA KEV catalog and return {cve_id: date_added}."""
+    req = urllib.request.Request(url, headers=HTTP_HEADERS)
+    with urllib.request.urlopen(req) as resp:
+        data = json.load(resp)
+
+    kev = {
+        entry["cveID"]: entry.get("dateAdded", "N/A")
+        for entry in data.get("vulnerabilities", [])
+    }
+
+    logger.info("Downloaded %d CISA KEV entr(y/ies)", len(kev))
+    return kev
+
+
 def process_json_file(json_file: str) -> tuple[dict, list[dict]]:
     with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -290,8 +340,27 @@ def process_json_file(json_file: str) -> tuple[dict, list[dict]]:
         "ssvc_automatable": ssvc_automatable,
         "has_patch_reference": has_patch_reference(reference_tags),
         "cvss_vector": vector_string,
+        "epss": "N/A",
+        "epss_percentile": "N/A",
+        "is_kev": 0,
+        "kev_date_added": "N/A",
     }
     return summary_row, extract_cpe_rows(cve, cve_id)
+
+
+def apply_enrichment(
+    rows: list[dict],
+    epss_scores: dict[str, tuple[str, str]],
+    kev: dict[str, str],
+) -> None:
+    """Left-join EPSS scores and CISA KEV status onto summary rows, in place."""
+    for row in rows:
+        cve_id = row["cve_id"]
+        if cve_id in epss_scores:
+            row["epss"], row["epss_percentile"] = epss_scores[cve_id]
+        if cve_id in kev:
+            row["is_kev"] = 1
+            row["kev_date_added"] = format_utc(kev[cve_id])
 
 
 def cve_id_sort_key(row: dict) -> tuple[int, int, str]:
@@ -387,6 +456,10 @@ def main(database_dir: str = DATABASE_DIR, output_dir: str = OUTPUT_DIR) -> None
     logger.info(
         "Processed %d CVE records (%d CPE match rows)", len(rows), len(cpe_rows)
     )
+
+    epss_scores = download_epss()
+    kev = download_kev()
+    apply_enrichment(rows, epss_scores, kev)
 
     rows.sort(key=cve_id_sort_key)
     cpe_rows.sort(key=cve_id_sort_key)

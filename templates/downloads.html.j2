@@ -20,7 +20,10 @@
         Both datasets are published one file per CVE year, as gzip-compressed CSV and Parquet.
         There is no combined "all years" file: the history only grows, and a single file would
         eventually break the deploy. Grab the years you need, or loop over all of them (see
-        <a href="#dbt">Using with dbt</a> below).
+        <a href="#dbt">Using with dbt</a> below), or fetch
+        <a href="{{ manifest_filename }}">{{ manifest_filename }}</a> for a machine-readable list of
+        each table's schema and full file list, keyed by <code>cve_summary</code> and
+        <code>cve_cpe</code>.
         Generated {{ generated_at }} UTC.
       </p>
       <p class="card-text text-muted">
@@ -72,35 +75,23 @@
       <h5 class="card-title">Using with dbt</h5>
       <p class="card-text text-muted">
         To use a dataset as a <a href="https://docs.getdbt.com/docs/build/seeds" target="_blank" rel="noopener">dbt seed</a>,
-        stitch the year files together into your project's <code>seeds/</code> directory: download each
-        year from 1999 to now, decompress it, and append it (keeping the header from the first year
-        only), then seed the result.
+        stitch the year files together into your project's <code>seeds/</code> directory. Rather than
+        guessing at a year range, fetch <a href="{{ manifest_filename }}">{{ manifest_filename }}</a>
+        and download every file it lists under the table's <code>files.csv</code>, decompressing and
+        appending each in turn (keeping the header from the first file only). Requires
+        <code>jq</code>.
       </p>
-      <pre class="bg-body-tertiary p-3 rounded mb-3"><code>dest=seeds/cve_summary.csv
+      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>table=cve_summary  # or cve_cpe
+dest="seeds/${table}.csv"
 : &gt; "$dest"
-for year in $(seq 1999 "$(date +%Y)"); do
-    url="{{ site_url }}/cve_summary_${year}.csv.gz"
+for url in $(curl -fsSL {{ site_url }}/{{ manifest_filename }} | jq -r ".${table}.files.csv[]"); do
     if [ -s "$dest" ]; then
         curl -fsSL "$url" | gunzip | tail -n +2 &gt;&gt; "$dest"
     else
         curl -fsSL "$url" | gunzip &gt; "$dest"
     fi
 done
-dbt seed --select cve_summary</code></pre>
-      <p class="card-text text-muted mb-2">
-        The same loop builds the <code>cve_cpe</code> child table, swapping the filename:
-      </p>
-      <pre class="bg-body-tertiary p-3 rounded mb-0"><code>dest=seeds/cve_cpe.csv
-: &gt; "$dest"
-for year in $(seq 1999 "$(date +%Y)"); do
-    url="{{ site_url }}/cve_cpe_${year}.csv.gz"
-    if [ -s "$dest" ]; then
-        curl -fsSL "$url" | gunzip | tail -n +2 &gt;&gt; "$dest"
-    else
-        curl -fsSL "$url" | gunzip &gt; "$dest"
-    fi
-done
-dbt seed --select cve_cpe</code></pre>
+dbt seed --select "$table"</code></pre>
     </div>
   </div>
 {% endblock %}
