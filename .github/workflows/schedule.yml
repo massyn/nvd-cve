@@ -3,10 +3,13 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 6,18 * * *'
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
