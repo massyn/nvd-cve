@@ -1,14 +1,11 @@
 # cve
-cve database
 
-## Catchup
+An automated sync of the [NVD API](https://nvd.nist.gov/developers/vulnerabilities) into this repository as raw JSON files, one per CVE, under `database/<year>/CVE-*.json`.
 
-The "catchup" process is our way of ensuring our database is as up to date with the real thing.  We don't know everything yet - we are still catching up.
+All data comes directly from NVD and is public. If you need authoritative or up to date information, always check [nvd.nist.gov](https://nvd.nist.gov/) directly, this repo may lag behind.
 
-* update_catchup.py - reads the CVEListV5 data, and builds a _cvelist.txt prioritised list for us
-* catchup.py - reads tht _cvelist.txt file, and does the download.  You can tweak things like
-    * --max-time - how many hours it should run
-    * --limit - how many objects it should retrieve
-    * --min-score - the minimum score we care about
-    * --filter - if we want to grab a specific type of CVE (like `CVE-2026`)
-By default it will try to download everything in the txt file that we don't already have.
+## How it works
+
+* `sync_database.py` / `nvd_client.py`, pulls changed CVEs from the NVD API into `database/`.
+
+A scheduled GitHub Actions workflow (`.github/workflows/schedule.yml`) runs the sync automatically.

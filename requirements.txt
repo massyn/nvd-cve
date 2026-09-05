@@ -1,4 +1,1 @@
 python-dotenv
-jinja2
-pyarrow
-pyyaml
