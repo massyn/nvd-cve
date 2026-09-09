@@ -21,7 +21,9 @@ MAX_MOD_DATE_SPAN_DAYS = 120
 RESULTS_PER_PAGE = 2000
 
 # Transient failures worth retrying instead of crashing the whole run.
-RETRYABLE_HTTP_CODES = {500, 502, 503, 504}
+# 520 (unknown origin error), 522 (connection timed out) and 524 (origin
+# timeout) are Cloudflare-specific codes NVD's front end emits under load.
+RETRYABLE_HTTP_CODES = {500, 502, 503, 504, 520, 522, 524}
 MAX_TRANSIENT_RETRIES = 10
 TRANSIENT_BACKOFF_BASE_SECONDS = 5
 TRANSIENT_BACKOFF_MAX_SECONDS = 300
