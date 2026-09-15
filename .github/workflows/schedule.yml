@@ -7,8 +7,9 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 jobs:
-  prepare:
+  build:
     runs-on: ubuntu-latest
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -26,29 +27,10 @@ jobs:
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-  updating:
-    needs: prepare
-    runs-on: ubuntu-latest
-    outputs:
-      changed: ${{ steps.sync.outputs.changed }}
-      added: ${{ steps.sync.outputs.added }}
-      updated: ${{ steps.sync.outputs.updated }}
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        show-progress: false
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.x'
-        cache: 'pip'
-
-    - name: Install dependencies
+    - name: Set git user
       run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        git config --global user.name "massyn"
+        git config --global user.email "phil.massyn@icloud.com"
 
     - name: Run sync script
       id: sync
@@ -56,57 +38,20 @@ jobs:
       env:
         NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
-    - name: Create patch of changes
-      id: patch
+    - name: Commit changes
+      id: commit
       run: |
         git add database/
         if [ -n "$(git status --porcelain -- database/)" ]; then
-          git diff --staged -- database/ > changes.patch
+          date=$(date +'%Y-%m-%d %H:%M:%S')
+          git commit -m "Schedule: $date (added ${{ steps.sync.outputs.added }}, updated ${{ steps.sync.outputs.updated }})"
           echo "changed=true" >> "$GITHUB_OUTPUT"
         else
-          echo "No changes to store."
-          echo "changed=false" >> "$GITHUB_OUTPUT"
+          echo "No changes to commit."
         fi
 
-    - name: Upload patch
-      if: steps.patch.outputs.changed == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: database-changes
-        path: changes.patch
-        retention-days: 1
-
-  storing:
-    needs: updating
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        show-progress: false
-
-    - name: Set git user
-      run: |
-        git config --global user.name "massyn"
-        git config --global user.email "phil.massyn@icloud.com"
-
-    - name: Download patch
-      if: needs.updating.outputs.changed == 'true'
-      uses: actions/download-artifact@v4
-      with:
-        name: database-changes
-
-    - name: Commit changes
-      if: needs.updating.outputs.changed == 'true'
-      run: |
-        git apply changes.patch
-        rm changes.patch
-        git add database/
-        date=$(date +'%Y-%m-%d %H:%M:%S')
-        git commit -m "Schedule: $date (added ${{ needs.updating.outputs.added }}, updated ${{ needs.updating.outputs.updated }})"
-
     - name: Push changes
-      if: needs.updating.outputs.changed == 'true'
+      if: steps.commit.outputs.changed == 'true'
       run: git push origin main
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
