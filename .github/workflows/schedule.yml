@@ -2,7 +2,7 @@ name: Daily Build
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 17 * * *'
+    - cron: '0 */2 * * *'
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
