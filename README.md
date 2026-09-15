@@ -1,5 +1,7 @@
 # cve
 
+[![Daily Build](https://github.com/massyn/nvd-cve/actions/workflows/schedule.yml/badge.svg)](https://github.com/massyn/nvd-cve/actions/workflows/schedule.yml)
+
 An automated sync of the [NVD API](https://nvd.nist.gov/developers/vulnerabilities) into this repository as raw JSON files, one per CVE, under `database/<year>/CVE-*.json`.
 
 All data comes directly from NVD and is public. If you need authoritative or up to date information, always check [nvd.nist.gov](https://nvd.nist.gov/) directly, this repo may lag behind.
