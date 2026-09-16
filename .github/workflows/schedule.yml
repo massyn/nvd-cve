@@ -1,4 +1,4 @@
-name: Daily Build
+name: Hourly Build
 on:
   workflow_dispatch:
   schedule:
