@@ -1,5 +1,6 @@
 """Client for fetching CVE data from the NVD API and caching it locally."""
 
+import http.client
 import json
 import logging
 import os
@@ -29,6 +30,23 @@ TRANSIENT_BACKOFF_BASE_SECONDS = 5
 TRANSIENT_BACKOFF_MAX_SECONDS = 300
 
 RATE_LIMIT_WINDOW_SECONDS = 30.0
+
+# Without a timeout a stalled connection hangs the job until GitHub Actions
+# kills it, instead of failing fast and being retried.
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 60.0
+
+# Transport failures worth retrying: connection errors and timeouts, the
+# connection dropping mid-body (http.client.IncompleteRead and other
+# HTTPException subclasses), or a body truncated cleanly enough that only
+# JSON/UTF-8 decoding notices.
+RETRYABLE_TRANSPORT_ERRORS = (
+    urllib.error.URLError,
+    http.client.HTTPException,
+    json.JSONDecodeError,
+    UnicodeDecodeError,
+    TimeoutError,
+    ConnectionError,
+)
 
 
 class EtaTracker:
@@ -75,12 +93,20 @@ class NVDClient:
     tracking the last successful sync timestamp.
     """
 
-    def __init__(self, db_dir: str = "database", api_key: str | None = None):
+    def __init__(
+        self,
+        db_dir: str = "database",
+        api_key: str | None = None,
+        request_timeout: float | None = None,
+    ):
         self.db_dir = db_dir
         self.meta_path = os.path.join(db_dir, "meta.json")
         self.api_key = (api_key or os.environ.get("NVD_API_KEY") or "").strip() or None
         # NVD rate limits: 5 requests / 30s without an API key, 50 requests / 30s with one.
         self.rate_limit_requests = 50 if self.api_key else 5
+        self.request_timeout = request_timeout or float(
+            os.environ.get("NVD_REQUEST_TIMEOUT", DEFAULT_REQUEST_TIMEOUT_SECONDS)
+        )
         self._request_timestamps: list[float] = []
         self._throttle_lock = threading.Lock()
 
@@ -173,7 +199,7 @@ class NVDClient:
             self._throttle()
             request = urllib.request.Request(url, headers=headers)
             try:
-                with urllib.request.urlopen(request) as response:
+                with urllib.request.urlopen(request, timeout=self.request_timeout) as response:
                     return json.loads(response.read().decode("utf-8"))
             except urllib.error.HTTPError as exc:
                 if exc.code == 429:
@@ -200,7 +226,7 @@ class NVDClient:
                     time.sleep(backoff)
                     continue
                 raise
-            except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            except RETRYABLE_TRANSPORT_ERRORS as exc:
                 transient_attempt += 1
                 if transient_attempt > MAX_TRANSIENT_RETRIES:
                     logger.error(
@@ -213,7 +239,7 @@ class NVDClient:
                     TRANSIENT_BACKOFF_MAX_SECONDS,
                 )
                 logger.warning(
-                    "Connection error (attempt %d/%d): %s, retrying in %ds",
+                    "Connection error (attempt %d/%d): %r, retrying in %ds",
                     transient_attempt, MAX_TRANSIENT_RETRIES, exc, backoff,
                 )
                 time.sleep(backoff)
