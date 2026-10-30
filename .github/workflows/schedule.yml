@@ -1,8 +1,8 @@
-name: Hourly Build
+name: Scheduled Build
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 */2 * * *'
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false

@@ -3,12 +3,11 @@
 import argparse
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
-from nvd_client import EtaTracker, NVDClient
+from nvd_client import NVDClient
 
 load_dotenv()
 
@@ -18,81 +17,83 @@ logger = logging.getLogger(__name__)
 # Default lookback when no meta.json exists yet.
 DEFAULT_LOOKBACK_DAYS = 30
 
+# Each window starts this far before the newest lastModified received last run,
+# so records NVD indexes slightly late are not missed. Overlapping records whose
+# cached copy is already current are skipped without being rewritten.
+DEFAULT_OVERLAP_MINUTES = 60
 
-def sync(client: NVDClient, no_refresh: bool = False, workers: int = 2) -> None:
+
+def window_start(meta: dict, now: datetime, overlap: timedelta) -> datetime:
+    """Return where this run's lastModStartDate should begin.
+
+    NVD recommends starting from the time of the last record received, which
+    meta.json holds as last_modified. Older meta.json files only have last_run
+    (the wall-clock time of the previous run), which is used as a fallback.
+    """
+    mark = meta.get("last_modified") or meta.get("last_run")
+    if mark is None:
+        logger.info("No meta.json found, defaulting lookback to %d days", DEFAULT_LOOKBACK_DAYS)
+        return now - timedelta(days=DEFAULT_LOOKBACK_DAYS)
+    return datetime.fromisoformat(mark) - overlap
+
+
+def sync(
+    client: NVDClient,
+    no_refresh: bool = False,
+    overlap: timedelta = timedelta(minutes=DEFAULT_OVERLAP_MINUTES),
+) -> None:
     """Pull everything changed since the last successful run and cache it.
 
-    If no_refresh is True, CVEs that already have a cached JSON file are
-    skipped entirely instead of being re-downloaded.
-    `workers` controls how many CVEs are downloaded concurrently; NVD's shared
-    request budget (5 or 50 per 30s) is enforced across all worker threads.
+    Records are saved straight from NVD's change query, which returns them in
+    full, so no CVE is downloaded twice. If no_refresh is True, CVEs that
+    already have a cached JSON file are left untouched.
     """
     client.migrate_flat_files()
 
     meta = client.load_meta()
     now = datetime.now(timezone.utc).replace(microsecond=0)
+    start = window_start(meta, now, overlap)
+    newest = datetime.fromisoformat(meta["last_modified"]) if "last_modified" in meta else None
 
-    if "last_run" in meta:
-        last_run = datetime.fromisoformat(meta["last_run"])
-    else:
-        last_run = now - timedelta(days=DEFAULT_LOOKBACK_DAYS)
-        logger.info("No meta.json found, defaulting lookback to %d days", DEFAULT_LOOKBACK_DAYS)
+    logger.info("Checking for CVEs changed between %s and %s", start, now)
+    added = updated = fresh = skipped = 0
+    for cve_record in client.iter_changed_cves(start, now):
+        cve_id = cve_record["cve"]["id"]
+        received_at = client.last_modified(cve_record)
+        if newest is None or received_at > newest:
+            newest = received_at
 
-    logger.info("Checking for CVEs changed between %s and %s", last_run, now)
-    changed_cve_ids = client.get_changed_cve_ids(last_run, now)
-    logger.info("%d CVE(s) need attention", len(changed_cve_ids))
-
-    not_yet_downloaded = []
-    already_fresh = []
-    stale = []
-    for cve_id in changed_cve_ids:
         cached_at = client.cached_last_modified(cve_id)
         if cached_at is None:
-            not_yet_downloaded.append(cve_id)
-        elif cached_at >= last_run:
-            # Cache already reflects this window's change (e.g. a prior run
-            # fetched it before crashing partway through), no need to refetch.
-            already_fresh.append(cve_id)
+            client.save_cve(cve_record)
+            added += 1
+            logger.info("%s (new)", cve_id)
+        elif cached_at >= received_at:
+            # Cache already holds this version (overlap with the previous
+            # window, or a prior run that crashed partway through).
+            fresh += 1
+        elif no_refresh:
+            skipped += 1
         else:
-            stale.append(cve_id)
+            client.save_cve(cve_record)
+            updated += 1
+            logger.info("%s (overwrite)", cve_id)
 
-    if no_refresh:
-        logger.info(
-            "%d new, %d already fresh, %d stale (skipped, --no-refresh)",
-            len(not_yet_downloaded), len(already_fresh), len(stale),
-        )
-        to_download = not_yet_downloaded
-    else:
-        logger.info(
-            "%d new, %d already fresh (skipped), %d stale (refresh)",
-            len(not_yet_downloaded), len(already_fresh), len(stale),
-        )
-        to_download = not_yet_downloaded + stale
-
-    not_yet_downloaded_set = set(not_yet_downloaded)
-    total = len(to_download)
-    eta = EtaTracker(total)
-
-    def process(i: int, cve_id: str) -> None:
-        client.get_cve(
-            cve_id, position=i, total=total,
-            skip_if_exists=cve_id in not_yet_downloaded_set,
-            log_suffix=eta.suffix(),
-        )
-
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [
-            executor.submit(process, i, cve_id)
-            for i, cve_id in enumerate(to_download, start=1)
-        ]
-        for future in as_completed(futures):
-            future.result()
+    logger.info(
+        "%d new, %d updated, %d already fresh, %d stale skipped (--no-refresh)",
+        added, updated, fresh, skipped,
+    )
 
     meta["last_run"] = now.isoformat()
+    if newest is not None:
+        meta["last_modified"] = newest.isoformat()
     client.save_meta(meta)
-    logger.info("Sync complete, last_run updated to %s", meta["last_run"])
+    logger.info(
+        "Sync complete, last_run %s, newest lastModified received %s",
+        meta["last_run"], meta.get("last_modified"),
+    )
 
-    write_github_output(added=len(not_yet_downloaded), updated=len(stale))
+    write_github_output(added=added, updated=updated)
 
 
 def write_github_output(added: int, updated: int) -> None:
@@ -109,15 +110,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Sync CVE data from NVD into a local cache.")
     parser.add_argument(
         "--no-refresh", action="store_true",
-        help="Skip CVEs that already have a cached JSON file instead of re-downloading them.",
+        help="Skip CVEs that already have a cached JSON file instead of overwriting them.",
     )
     parser.add_argument(
-        "--workers", type=int, default=2,
-        help="Number of CVEs to download concurrently (default: 2).",
+        "--overlap-minutes", type=int,
+        default=int(os.environ.get("NVD_SYNC_OVERLAP_MINUTES", DEFAULT_OVERLAP_MINUTES)),
+        help=(
+            "Start each window this many minutes before the newest lastModified "
+            f"received last run (default: {DEFAULT_OVERLAP_MINUTES}, "
+            "or NVD_SYNC_OVERLAP_MINUTES)."
+        ),
     )
     args = parser.parse_args()
 
-    sync(NVDClient(), no_refresh=args.no_refresh, workers=args.workers)
+    sync(
+        NVDClient(),
+        no_refresh=args.no_refresh,
+        overlap=timedelta(minutes=args.overlap_minutes),
+    )
 
 
 if __name__ == "__main__":

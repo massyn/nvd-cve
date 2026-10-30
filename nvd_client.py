@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,8 @@ RETRYABLE_TRANSPORT_ERRORS = (
 class EtaTracker:
     """Thread-safe helper that estimates time remaining across a batch of work.
 
-    Shared by catchup.py and sync_database.py so both report progress the
-    same way when downloading CVEs concurrently.
+    Used by scripts that download CVEs one by one, concurrently, so they all
+    report progress the same way.
     """
 
     def __init__(self, total: int):
@@ -140,16 +141,22 @@ class NVDClient:
             logger.info("Migrated %d CVE file(s) into year subfolders", moved)
 
     def cached_last_modified(self, cve_id: str) -> datetime | None:
-        """Return the lastModified timestamp of the cached CVE, or None if not cached.
-
-        NVD's lastModified field carries no UTC offset; it is treated as UTC.
-        """
+        """Return the lastModified timestamp of the cached CVE, or None if not cached."""
         path = self.cve_path(cve_id)
         if not os.path.exists(path):
             return None
         with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return datetime.fromisoformat(data["cve"]["lastModified"]).replace(tzinfo=timezone.utc)
+            return self.last_modified(json.load(f))
+
+    @staticmethod
+    def last_modified(cve_record: dict) -> datetime:
+        """Return an NVD CVE record's lastModified timestamp.
+
+        NVD's lastModified field carries no UTC offset; it is treated as UTC.
+        """
+        return datetime.fromisoformat(cve_record["cve"]["lastModified"]).replace(
+            tzinfo=timezone.utc
+        )
 
     def load_meta(self) -> dict:
         if os.path.exists(self.meta_path):
@@ -244,22 +251,24 @@ class NVDClient:
                 )
                 time.sleep(backoff)
 
-    def get_changed_cve_ids(self, last_mod_start: datetime, last_mod_end: datetime) -> list[str]:
-        """Return CVE IDs modified/published in the given window, handling pagination
-        and NVD's 120-day max span by splitting into smaller chunks."""
-        cve_ids: list[str] = []
+    def iter_changed_cves(
+        self, last_mod_start: datetime, last_mod_end: datetime
+    ) -> Iterator[dict]:
+        """Yield full CVE records modified/published in the given window, handling
+        pagination and NVD's 120-day max span by splitting into smaller chunks.
+
+        The change query already returns complete records, so callers can save
+        them directly instead of re-fetching each CVE by ID.
+        """
         chunk_start = last_mod_start
 
         while chunk_start < last_mod_end:
             chunk_end = min(chunk_start + timedelta(days=MAX_MOD_DATE_SPAN_DAYS), last_mod_end)
-            cve_ids.extend(self._get_changed_cve_ids_for_span(chunk_start, chunk_end))
+            yield from self._iter_changed_cves_for_span(chunk_start, chunk_end)
             chunk_start = chunk_end
 
-        return cve_ids
-
-    def _get_changed_cve_ids_for_span(self, start: datetime, end: datetime) -> list[str]:
+    def _iter_changed_cves_for_span(self, start: datetime, end: datetime) -> Iterator[dict]:
         logger.info("Querying changes between %s and %s", start, end)
-        cve_ids: list[str] = []
         start_index = 0
 
         while True:
@@ -271,7 +280,6 @@ class NVDClient:
             }
             data = self._nvd_get(params)
             vulnerabilities = data.get("vulnerabilities", [])
-            cve_ids.extend(v["cve"]["id"] for v in vulnerabilities if "cve" in v)
 
             total_results = data.get("totalResults", 0)
             start_index += len(vulnerabilities)
@@ -279,10 +287,18 @@ class NVDClient:
                 "  page fetched: %d/%d results so far for this span",
                 start_index, total_results,
             )
+            yield from (v for v in vulnerabilities if "cve" in v)
             if start_index >= total_results or not vulnerabilities:
                 break
 
-        return cve_ids
+    def save_cve(self, cve_record: dict) -> bool:
+        """Write an NVD CVE record to the database folder; return True if it is new."""
+        path = self.cve_path(cve_record["cve"]["id"])
+        is_new = not os.path.exists(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(cve_record, f, indent=2)
+        return is_new
 
     def get_cve(
         self,
@@ -308,12 +324,7 @@ class NVDClient:
             raise ValueError(f"NVD returned no data for {cve_id}")
 
         cve_record = vulnerabilities[0]
-
-        path = self.cve_path(cve_id)
-        is_new = not os.path.exists(path)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            json.dump(cve_record, f, indent=2)
+        is_new = self.save_cve(cve_record)
 
         status = "new" if is_new else "overwrite"
         if position is not None and total is not None:
