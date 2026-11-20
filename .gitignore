@@ -2,3 +2,6 @@
 __pycache__/
 dist/
 _cvelist.txt
+.venv/
+.cache/
+data/
